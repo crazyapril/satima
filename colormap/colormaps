@@ -1,0 +1,5 @@
+[ir]
+ir = bd, color, cc, rammb, nhc, ott, rbtop, avn, rb, mb, ca
+
+[wv]
+wv = nrl, ssd, noaa
