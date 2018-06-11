@@ -1,8 +1,12 @@
-from glob import glob
-from os.path import isfile, split, join
-import numpy as np
 import bz2
+import datetime
+from glob import glob
+from os.path import isfile, join, split
+
+import numpy as np
+
 from ._sate_param import _hmw_data_for_seg_calc as _data_
+from .utils import reglob
 
 __all__ = ['READABLE', 'HIMAWARI_HSD']
 
@@ -23,21 +27,36 @@ class HIMAWARI_HSD:
         self.fid = fid
         self.hsd_dict = {}
         np.seterr(invalid='ignore')
-
-    @staticmethod
-    def search(filedir):
-        namefmt = 'HS_H08_*_*_B*_FLDK_R*_S*10.DAT'
-        filelist = glob(join(filedir, namefmt)) + glob(join(filedir, namefmt + '.bz2'))
-        options = []
-        minor_idlist = []
-        for entire_fname in filelist:
-            fname = split(entire_fname)[1]
-            time = fname[7:15] + fname[16:20]
-            if time not in minor_idlist:
-                fid = dict(time=time, name=entire_fname, type='himawari_hsd', fdir=filedir, sate='HIMAWARI-8', area='')
-                minor_idlist.append(time)
-                options.append(fid)
-        return options
+		
+    @classmethod
+    def search(cls, filedir):
+        #HS_H0[0:8/9]_[1:YYYYMMDD]_[2:HHMM]_B[3:Band]_[4:Area]_R[5:Res]_S[6:Seg].DAT[.bz2]
+        namefmt = 'HS_H0*_*_*_B*_*_R*_S*.DAT'
+        filelist = reglob(filedir, namefmt) + reglob(filedir, namefmt+'.bz2')
+        idlist = dict()
+        for fname, info in filelist:
+            if info[4] == 'FLDK':
+                area = ''
+            elif info[4][:2] == 'R3':
+                area = 'TARGET'
+            elif info[4][:2] == 'JP':
+                area = 'JAPAN'
+            time = datetime.datetime.strptime(info[1] + info[2], '%Y%m%d%H%M')
+            if area:
+                time = time + datetime.timedelta(minutes=2.5*int(info[4][2:])-2.5)
+                flag = ['AUTOGEO']
+            else:
+                flag = []
+            band = 'band' + info[3]
+            minor_id = time, area
+            if minor_id not in idlist:
+                fid = dict(time=time.strftime('%Y%m%d%H%M'), fdir=filedir, type='himawari_hsd',
+                           flag=flag, fcls=cls, sate='HIMAWARI-'+info[0][-1], channel={band:fname},
+                           area=area, special_channel=dict(), name=join(filedir, fname))
+                idlist[minor_id] = fid
+            else:
+                idlist[minor_id]['channel'][band] = fname
+        return list(idlist.values())
 
     def get_channel_info(self):
         filedir, fname = split(self.fid['name'])
@@ -51,16 +70,25 @@ class HIMAWARI_HSD:
         return channel_flag
 
     def extract(self, channel, georange):
-        res = self.resolution[channel]
-        seglist, corner = _CalcSegNeeded(georange)
-        print(channel, corner)
-        hsd, raw = _CombineHSD(self.fid, seglist, corner, channel)
-        if channel not in self.hsd_dict.keys():
+        if 'AUTOGEO' in self.fid.get('flag', []):
+            hsd, raw = _HSDReader(join(self.fid['fdir'], self.fid['channel'][channel]))
+        else:
+            seglist, corner = _CalcSegNeeded(georange)
+            print(channel, corner)
+            hsd, raw = _CombineHSD(self.fid, seglist, corner, channel)
+        if channel not in self.hsd_dict:
             self.hsd_dict[channel] = hsd
         return _Calibration(self.hsd_dict[channel], raw)
 
     def geocoord(self, channel):
         return _GetLonLat(self.hsd_dict[channel])
+
+    def get_auto_georange(self):
+        channel = next(iter(self.fid['channel']))
+        hsd, raw = _HSDReader(join(self.fid['fdir'], self.fid['channel'][channel]))
+        self.hsd_dict[channel] = hsd
+        lons, lats = _GetLonLat(hsd)
+        return lats.min(), lats.max(), lons.min(), lons.max()
 
 _BLOCK_01 = np.dtype([('HeaderBlockNumber', 'u1'),
                      ('BlockLength', 'u2'),
@@ -150,7 +178,7 @@ def _get_channel_filename(fname, channel):
 def _get_segment_filename(fname, seg_no):
         return fname[:35] + '%02d' % (seg_no) + fname[37:]
 
-def _HSDReader(fname, corner):
+def _HSDReader(fname, corner=None):
     HSD = {}
     if not isfile(fname):
         raise IOError('Require ' + fname)
@@ -170,12 +198,16 @@ def _HSDReader(fname, corner):
     _LeapBlock(f, 1)
     HSD['BLOCK_07'] = np.fromstring(f.read(47), dtype=_BLOCK_07)
     _LeapBlock(f, 4)
-    lines = HSD['BLOCK_02']['NumberOfLines']
-    columns = HSD['BLOCK_02']['NumberOfColumns']
+    lines = HSD['BLOCK_02']['NumberOfLines'].item()
+    columns = HSD['BLOCK_02']['NumberOfColumns'].item()
     raw = np.ma.masked_greater(np.fromstring(f.read(), dtype='uint16').reshape((lines, columns)), 65530)
-    column_west = int(raw.shape[1] * corner[0])
-    column_east = int(raw.shape[1] * corner[1])
-    print(column_west, column_east)
+    if corner:
+        column_west = int(raw.shape[1] * corner[0])
+        column_east = int(raw.shape[1] * corner[1])
+        print(column_west, column_east)
+    else:
+        column_west = 0
+        column_east = raw.shape[1] - 1
     HSD['ColumnBoundary'] = (column_west, column_east)
     f.close()
     return HSD, raw[:,column_west:column_east]
@@ -183,7 +215,7 @@ def _HSDReader(fname, corner):
 def _LeapBlock(f, n):
     for i in range(n):
         tmparr = np.fromstring(f.read(3), dtype=_Header)
-        f.seek(tmparr['BlockLength']-3, 1)
+        f.seek(tmparr['BlockLength'].item()-3, 1)
     del tmparr
 
 def _Calibration(HSD, raw):

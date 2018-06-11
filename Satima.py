@@ -83,6 +83,9 @@ class Satima:
         print()
 
     def get_georange(self):
+        if 'AUTOGEO' in self.fid.get('flag', []):
+            self.georange = self.fileclass.get_auto_georange()
+            return
         while True:
             latmin = safe_input('请输入最南纬度: ')
             latmax = safe_input('请输入最北纬度: ')
@@ -271,7 +274,7 @@ class Satima:
             
     def imager(self, choice):
         fig = plt.figure(figsize=self.figsize)
-        ax = plt.gca()
+        ax = fig.add_axes([0, 0, 1, 1])
         if not self.fileclass.remap:
             mat = self.load_raw(choice)
             plt.imshow(mat, interpolation='nearest', extent=[self.georange[2], self.georange[3], self.georange[0], self.georange[1]],
@@ -301,8 +304,9 @@ class Satima:
             self.map.drawmeridians(range(0,360,self.settings['latlon']['step']), linewidth=self.settings['latlon']['width'],
                                    dashes=(None, None), color=self.settings['latlon']['color'])
         plt.axis('off')
-        plt.tight_layout(pad=0.)
-        plt.savefig(join(self.fid['fdir'], self.get_imtype(choice).upper() + self.fid['time'] + '.png'), dpi=self.dpi, facecolor=self.settings['image']['background'])
+        #plt.tight_layout(pad=0.)
+        plt.savefig(join(self.fid['fdir'], self.get_imtype(choice).upper() + self.fid['time'] + '.png'),
+                    dpi=self.dpi, facecolor=self.settings['image']['background'])
         plt.clf()
 
 def launcher(path='.'):
