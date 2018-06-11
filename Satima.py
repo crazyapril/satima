@@ -1,15 +1,18 @@
+from datetime import datetime
 from os import system
 from os.path import join
+
 import matplotlib.pyplot as plt
-from mpl_toolkits.basemap import Basemap
 import numpy as np
-from datetime import datetime
+from mpl_toolkits.basemap import Basemap
+
 from _FileSearch import FileSearch
 from _Settings import Settings
-from satellite import  _sate_param
 from colormap import Colormap
-from _confs import (convert_time_format, get_multi_choices_template, is_ascii,
-                    safe_str2value, safe_input, unique_elements)
+from satellite import _sate_param
+from satellite.utils import (convert_time_format, get_multi_choices_template,
+                             is_ascii, safe_input, safe_str2value,
+                             unique_elements)
 
 DEBUG = False
 

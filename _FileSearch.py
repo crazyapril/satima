@@ -1,9 +1,11 @@
-from glob import glob
-from os.path import isfile, split, join
 import pkgutil
+from glob import glob
+from os.path import isfile, join, split
 from tkinter import Tk
 from tkinter.filedialog import askdirectory
-from _confs import convert_time_format, get_single_choice_template
+
+from satellite.utils import convert_time_format, get_single_choice_template
+
 
 class FileSearch:
 
